@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alexflint/go-arg"
@@ -26,7 +27,7 @@ func TestArgs(t *testing.T) {
 			args: []string{"cmd", "https://www.netflix.com/watch/81405170?trackId=254015180"},
 			expArgs: &Args{
 				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170?trackId=254015180"),
-				DownloadDir: cwd(t),
+				DownloadDir: filepath.Join(cwd(t), "downloads"),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 			},
 		},
@@ -44,7 +45,7 @@ func TestArgs(t *testing.T) {
 			args: []string{"cmd", "-b", "chrome", "-p", "/custom/profile", "https://www.netflix.com/watch/81405170"},
 			expArgs: &Args{
 				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
-				DownloadDir: cwd(t),
+				DownloadDir: filepath.Join(cwd(t), "downloads"),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 				Browser:     "chrome",
 				ProfileDir:  "/custom/profile",
@@ -55,7 +56,7 @@ func TestArgs(t *testing.T) {
 			args: []string{"cmd", "-p", "/custom/profile", "https://www.netflix.com/watch/81405170"},
 			expArgs: &Args{
 				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
-				DownloadDir: cwd(t),
+				DownloadDir: filepath.Join(cwd(t), "downloads"),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 				Browser:     "chrome",
 				ProfileDir:  "/custom/profile",
@@ -66,7 +67,7 @@ func TestArgs(t *testing.T) {
 			args: []string{"cmd", "https://www.notnetflix.com/foo"},
 			expArgs: &Args{
 				VideoURL:    parseUrl(t, "https://www.notnetflix.com/foo"),
-				DownloadDir: cwd(t),
+				DownloadDir: filepath.Join(cwd(t), "downloads"),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 			},
 			expErr: ErrUnsupportedUrl,
@@ -76,7 +77,7 @@ func TestArgs(t *testing.T) {
 			args: []string{"cmd", "-b", "safari_fake", "https://www.netflix.com/watch/81405170"},
 			expArgs: &Args{
 				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
-				DownloadDir: cwd(t),
+				DownloadDir: filepath.Join(cwd(t), "downloads"),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 				Browser:     "safari_fake",
 			},

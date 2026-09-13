@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/alexflint/go-arg"
 	"github.com/IljaN/narr/internal/browser"
@@ -15,7 +16,7 @@ var ErrDownloadDirInvalid = fmt.Errorf("DownloadDir is invalid")
 
 type Args struct {
 	VideoURL    *url.URL `arg:"positional,required" help:"url of the video to download audio from. Must be a Netflix URL."`
-	DownloadDir string   `arg:"positional" default:"." help:"directory where to download the audio files. Defaults to current working directory."`
+	DownloadDir string   `arg:"positional" default:"downloads" help:"directory where to download the audio and subtitle files. Defaults to ./downloads."`
 	ChromeURL   *url.URL `arg:"-c, --chrome-url" default:"http://127.0.0.1:9222" help:"url of the chrome debugger."`
 	Browser     string   `arg:"-b, --browser" help:"launch browser automatically (chrome, edge, brave, or executable path)."`
 	ProfileDir  string   `arg:"-p, --profile-dir" help:"custom browser user profile directory. Defaults to ~/.narr/profiles/<browser>."`
@@ -59,15 +60,16 @@ func validateArgs(a *Args) error {
 
 func processDownloadDir(a *Args) error {
 	var path = a.DownloadDir
-	if path != "." {
+	if path != "downloads" {
 		a.DownloadDir = path
 		return nil
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		a.DownloadDir = cwd
+		a.DownloadDir = filepath.Join(cwd, "downloads")
 		return nil
 	} else {
 		return err
 	}
 }
+
