@@ -1,10 +1,23 @@
 # Narr
-Netflix Audio Ripper - Download audio tracks from Netflix to sample your favourite shows. :musical_note:
+
+Netflix Audio & Subtitle Ripper — Automatically intercept and download audio tracks and subtitles from Netflix as you watch. 🎵 🔤
+
+## Features
+
+- **Audio & Subtitle Interception:** Automatically intercepts and downloads audio (`.m4a`) and subtitles (`.ttml`) directly from the stream.
+- **Auto-Browser Launch:** Automatically launches Chrome, Edge, or Brave with remote debugging enabled and a persistent profile so you only log in once.
+- **Smart Organization:** Saves everything to `./downloads/` organized by show, season, and episode:
+  - `downloads/<ShowTitle>/Season <N>/<EpisodeNum> - <EpisodeTitle> - <Language>.m4a`
+  - `downloads/<ShowTitle>/Season <N>/<EpisodeNum> - <EpisodeTitle> - <Language>.ttml`
+- **SDH / Closed Caption Detection:** Identifies SDH/CC subtitle tracks and tags them with a `-cc` suffix (e.g. `en-cc.ttml`) to prevent collisions with regular subtitle tracks.
+- **Deduplication & Resume:** Skips files that have already been downloaded, preventing duplicate network requests and overwrites.
+- **Windows Resilient:** Employs retry backoff when saving files to protect against Windows Defender and search indexer file locks.
 
 ## Usage
 
 ### Option A: Automatic Browser Launch (Recommended)
-Narr can automatically launch Chrome, Edge, or Brave with an isolated user profile and connect to it:
+
+Narr can automatically launch your preferred browser with an isolated user profile:
 
 ```bash
 # Launch Google Chrome with dedicated persistent profile
@@ -17,90 +30,52 @@ narr --browser edge "https://www.netflix.com/watch/12345678"
 narr --browser brave "https://www.netflix.com/watch/12345678"
 
 # Specify a custom profile folder
-narr -b chrome -p "./my-profile" "https://www.netflix.com/watch/12345678"
+narr -b chrome -p "./chrome-debug-profile" "https://www.netflix.com/watch/12345678"
 ```
-*Note: The default profile is saved to `~/.narr/profiles/<browser>`, so you only need to log in to Netflix once!*
+*Note: The default profile is saved to `~/.narr/profiles/<browser>`, preserving your Netflix login session.*
 
 ### Option B: Connect to an Existing Browser
-Alternatively, start your browser manually with remote debugging enabled:
+
+Start your browser manually with remote debugging enabled:
+
 ```bash
- google-chrome --remote-debugging-port=9222
- brave-browser --remote-debugging-port=9222
- ./msedge.exe  --remote-debugging-port=9222
+# Chrome
+google-chrome --remote-debugging-port=9222
+
+# Brave
+brave-browser --remote-debugging-port=9222
+
+# Edge (Windows)
+msedge.exe --remote-debugging-port=9222
 ```
-And run narr:
+
+Then run narr:
+
 ```bash
 narr "https://www.netflix.com/watch/12345678"
 ```
 
-Observe the progress in the terminal:
+### Live Interception
 
-```bash
-2023/02/18 18:34:25 ▼ Downloading https://www.netflix.com/watch/81237996?trackId=14170056  ⟾  /home/looper/81237996-14170056-4037200794235010051
-2023/02/18 18:34:35 ✓ Finished    https://www.netflix.com/watch/81237996?trackId=14170056  ⟾  /home/looper/81237996-14170056-4037200794235010051, got 65346400 bytes
-```
-
-You can navigate to any other show or episode or change the language of the audio track while narr is running. It will
-download the audio track of the currently playing episode.
-
-```bash
-2023/02/18 18:34:25 ▼ Downloading https://www.netflix.com/watch/81237996?trackId=14170056  ⟾  /home/looper/81237996-14170056-4037200794235010051
-2023/02/18 18:34:35 ✓ Finished    https://www.netflix.com/watch/81237996?trackId=14170056  ⟾  /home/looper/81237996-14170056-4037200794235010051, got 65346400 bytes
-2023/02/18 16:59:42 🗺Navigate to https://www.netflix.com/watch/81238005?trackId=14170056 
-2023/02/18 16:59:43 ▼ Downloading https://www.netflix.com/watch/81238005?trackId=14170056  ⟾  /home/looper/81238005-14170056-605394647632969758
-2023/02/18 16:59:53 ✓ Finished    https://www.netflix.com/watch/81238005?trackId=14170056  ⟾  /home/looper/81238005-14170056-605394647632969758, got 65346400 bytes
-```
-
-It is also possible to navigate to the Netflix home page. Narr will then download audio tracks of trailers or previews.
-
-## How it works
-
-Narr uses the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) to communicate with the
-browser. It intercepts network media requests, extracts show/episode metadata from the DOM, and losslessly downloads audio tracks in `.m4a` format.
-
-## Architecture (SRP, DRY, KISS, YAGNI)
-
-The codebase is organized into modular packages under `internal/` with strict **Single Responsibility** and **zero premature abstractions**:
+While Narr is running, you can navigate to any episode or switch audio/subtitle languages in the Netflix player. Narr will detect the new streams and download them on the fly:
 
 ```text
-├── internal/
-│   ├── netflix/     # Netflix client (DOM & stream interception via CDP)
-│   ├── browser/     # CDP connection management & dual-stack (IPv4/IPv6) fallback
-│   ├── media/       # MP4 ISOBMFF header probing & ISO-639-2 language decoding
-│   ├── storage/     # Path resolution, OS character sanitization & atomic file writes
-│   └── downloader/  # Concurrent worker pool, deduplication & status event reporting
-├── args.go          # CLI argument validation & versioning
-└── main.go          # Dependency injection & application orchestration
+2026/09/13 14:05:17 Ꙫ Successfully connected to browser debugger at http://127.0.0.1:9222
+2026/09/13 14:05:26 🎬 Metadata detected: DANG! [Season 1 E06 - The Milking Room]
+2026/09/13 14:05:27 ▼ [5bafc98020e5] Downloading ... to downloads\DANG!\Season 1\E06 - The Milking Room - German.m4a
+2026/09/13 14:05:28 🔤 [626894bd4614] Downloading ... to downloads\DANG!\Season 1\E06 - The Milking Room - de.ttml
+2026/09/13 14:05:30 ✓ [626894bd4614] Finished    downloads\DANG!\Season 1\E06 - The Milking Room - de.ttml, got 81058 bytes in 1.8s
+2026/09/13 14:06:05 ✓ [5bafc98020e5] Finished    downloads\DANG!\Season 1\E06 - The Milking Room - German.m4a, got 36670020 bytes in 38.2s
 ```
 
-### Key Principles:
-- **Single Responsibility (SRP):** Each package handles exactly one domain (browser connection, storage paths, media probing, or downloader queue).
-- **Don't Repeat Yourself (DRY):** Shared metadata types and path resolution logic are centralized and reused across components.
-- **YAGNI & KISS:** No over-engineered provider registries or unused interfaces. Direct, readable, and fully testable Go code.
+## CLI Reference
 
-### Features:
-- **Automatic Organization:** Automatically creates directories organized by show and season (`<ShowTitle>/Season <N>/`) and formats files as `E<EpisodeNumber> - <EpisodeTitle> - <Language>.m4a` (e.g. `DANG/Season 1/E01 - Pilot - English.m4a`).
-- **Smart Deduplication & Skip:** Skips downloads immediately if the target file already exists on disk or was already queued.
-- **Atomic Downloads:** Writes to `.downloading` files and renames upon completion to guarantee uncorrupted audio files.
-
-## Build & Test
-
-```bash
-# Run all unit tests
-go test -v ./...
-
-# Build binary
-go build -o narr.exe .
-```
-
-## Flags
-
-```bash
+```text
 Usage: narr [--chrome-url CHROME-URL] [--browser BROWSER] [--profile-dir PROFILE-DIR] [--headless] VIDEOURL [DOWNLOADDIR]
 
 Positional arguments:
-  VIDEOURL               url of the video to download audio from. Must be a supported platform URL (e.g. Netflix).
-  DOWNLOADDIR            directory where to download the audio files. Defaults to current working directory.
+  VIDEOURL               url of the video to download audio and subtitles from. Must be a Netflix URL.
+  DOWNLOADDIR            directory where to download the audio and subtitle files. Defaults to ./downloads.
 
 Options:
   --chrome-url CHROME-URL, -c CHROME-URL
@@ -114,3 +89,25 @@ Options:
   --version              display version and exit
 ```
 
+## Project Structure
+
+```text
+├── internal/
+│   ├── browser/     # Browser launcher & CDP debugger connection management
+│   ├── downloader/  # Concurrent download queue, deduplication & status reporting
+│   ├── media/       # MP4 ISOBMFF header probing & audio language extraction
+│   ├── netflix/     # Netflix DOM metadata extraction & media/subtitle stream interception
+│   └── storage/     # Path resolution, TTML subtitle parsing, and atomic file operations
+├── args.go          # CLI argument parsing and validation
+└── main.go          # Main application loop and event handling
+```
+
+## Build & Test
+
+```bash
+# Run tests
+go test ./...
+
+# Build binary
+go build -o narr.exe .
+```
