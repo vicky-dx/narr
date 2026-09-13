@@ -1,3 +1,25 @@
-.idea
-bin
+# Binaries
+bin/
 narr
+narr.exe
+*.exe
+
+# IDE / Editor
+.idea/
+.vscode/
+
+# Browser profiles & local cache
+chrome-debug-profile/
+.narr/
+
+# Downloaded media & temporary files
+downloads/
+*.m4a
+*.ttml
+*.srt
+*.vtt
+*.downloading
+
+# OS files
+Thumbs.db
+.DS_Store

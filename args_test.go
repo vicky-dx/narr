@@ -1,11 +1,13 @@
 package main
 
 import (
-	"github.com/alexflint/go-arg"
-	"github.com/stretchr/testify/assert"
+	"fmt"
 	"net/url"
 	"os"
 	"testing"
+
+	"github.com/alexflint/go-arg"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestArgs(t *testing.T) {
@@ -38,6 +40,28 @@ func TestArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "WithBrowser",
+			args: []string{"cmd", "-b", "chrome", "-p", "/custom/profile", "https://www.netflix.com/watch/81405170"},
+			expArgs: &Args{
+				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
+				DownloadDir: cwd(t),
+				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
+				Browser:     "chrome",
+				ProfileDir:  "/custom/profile",
+			},
+		},
+		{
+			name: "WithProfileDirOnlyDefaultsToChrome",
+			args: []string{"cmd", "-p", "/custom/profile", "https://www.netflix.com/watch/81405170"},
+			expArgs: &Args{
+				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
+				DownloadDir: cwd(t),
+				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
+				Browser:     "chrome",
+				ProfileDir:  "/custom/profile",
+			},
+		},
+		{
 			name: "InvalidVideoUrl",
 			args: []string{"cmd", "https://www.notnetflix.com/foo"},
 			expArgs: &Args{
@@ -45,7 +69,18 @@ func TestArgs(t *testing.T) {
 				DownloadDir: cwd(t),
 				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
 			},
-			expErr: ErrNotNetflixUrl,
+			expErr: ErrUnsupportedUrl,
+		},
+		{
+			name: "InvalidBrowser",
+			args: []string{"cmd", "-b", "safari_fake", "https://www.netflix.com/watch/81405170"},
+			expArgs: &Args{
+				VideoURL:    parseUrl(t, "https://www.netflix.com/watch/81405170"),
+				DownloadDir: cwd(t),
+				ChromeURL:   parseUrl(t, "http://127.0.0.1:9222"),
+				Browser:     "safari_fake",
+			},
+			expErr: fmt.Errorf("unsupported browser 'safari_fake'. Supported: chrome, edge, brave, or path to executable"),
 		},
 	}
 

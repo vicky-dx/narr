@@ -2,113 +2,152 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"math/rand"
-	"net/url"
-	"strconv"
-	"strings"
+	"time"
+
+	"github.com/IljaN/narr/internal/browser"
+	"github.com/IljaN/narr/internal/downloader"
+	"github.com/IljaN/narr/internal/media"
+	"github.com/IljaN/narr/internal/netflix"
+	"github.com/IljaN/narr/internal/storage"
 )
-
-type Args struct {
-	VideoURL    *url.URL `arg:"positional,required" help:"url of the video to download audio from. Must be a netflix url. e.g. https://www.netflix.com/watch/12345678?trackId=12345678"`
-	DownloadDir string   `arg:"positional" default:"." help:"directory where to download the audio files. Defaults to current working directory."`
-	ChromeURL   *url.URL `arg:"-c, --chrome-url" default:"http://127.0.0.1:9222" help:"url of the chrome debugger."`
-}
-
-var Version string
-
-func (Args) Version() string {
-	return Version
-}
 
 func main() {
 	args := &Args{}
 	mustParse(args)
 
-	// Connect to Chrome debugger, retry until success
 	ctx := context.Background()
-	chromeURL := args.ChromeURL.String()
-	chrome := tryConnectToChromeUntilSuccess(ctx, chromeURL)
 
-	log.Printf("Ꙫ Sucessfully connected to Chrome at %s", chromeURL)
+	// 1. Optionally launch browser instance if requested
+	if args.Browser != "" {
+		port := 9222
+		if args.ChromeURL != nil && args.ChromeURL.Port() != "" {
+			var p int
+			if _, err := fmt.Sscanf(args.ChromeURL.Port(), "%d", &p); err == nil && p > 0 {
+				port = p
+			}
+		}
 
-	// Create task queue for downloading
-	q := NewDownloadQueue()
-	defer q.Release()
+		launchCfg := browser.LaunchConfig{
+			Browser:    args.Browser,
+			ProfileDir: args.ProfileDir,
+			Port:       port,
+			Headless:   args.Headless,
+		}
 
-	// Listen for download status updates
-	q.OnStatusReceived(func(status DownloadStatus) {
+		log.Printf("🚀 Launching browser (%s) on port %d...", args.Browser, port)
+		proc, err := browser.Launch(ctx, launchCfg)
+		if err != nil {
+			log.Fatalf("Failed to launch browser: %v", err)
+		}
+		defer func() {
+			if proc != nil {
+				_ = proc.Kill()
+			}
+		}()
+
+		if err := browser.WaitForDebugger(ctx, args.ChromeURL.String(), 15*time.Second); err != nil {
+			log.Fatalf("Failed waiting for browser debugger: %v", err)
+		}
+	}
+
+	// 2. Connect to browser debugger
+	chrome := browser.ConnectUntilSuccess(ctx, args.ChromeURL.String(), 1*time.Second)
+	log.Printf("Ꙫ Successfully connected to browser debugger at %s", args.ChromeURL.String())
+
+	nflx := netflix.New(chrome)
+
+	// 3. Initialize Media Prober & Downloader Queue
+	prober := media.NewProber()
+	queue := downloader.NewQueue(prober)
+	defer queue.Release()
+
+	// 4. Register download status logger
+	queue.OnStatusReceived(func(status downloader.Status) {
 		task := status.Task()
+		isSubtitle := task.SubtitleLang != ""
+		icon := "▼"
+		if isSubtitle {
+			icon = "🔤"
+		}
 		switch s := status.(type) {
-		case Queuing:
+		case downloader.Queuing:
 			break
-		case Begin:
-			log.Printf("▼ [%s] Downloading %s to %s", s.TaskId(), task.VideoUrl, task.FullFilePath)
-		case Finished:
-			log.Printf("✓ [%s] Finished %s  ⟾  %s (got %d bytes in %f)", s.TaskId(), task.VideoUrl, task.FullFilePath, s.BytesReceived(), s.Duration().Seconds())
+		case downloader.Begin:
+			log.Printf("%s [%s] Downloading %s to %s", icon, s.TaskId(), task.VideoURL, task.FullFilePath)
+		case downloader.Finished:
+			log.Printf("✓ [%s] Finished %s  ⟾  %s (got %d bytes in %.2fs)",
+				s.TaskId(), task.VideoURL, task.FullFilePath, s.BytesReceived(), s.Duration().Seconds())
+		case downloader.Skipped:
+			log.Printf("⏭ [%s] Already downloaded, skipping: %s", s.TaskId(), task.FullFilePath)
 		}
 	})
 
-	nflx := NewNFLX(chrome)
-
-	// Navigate to the initial url
-	err := nflx.NavigateTo(ctx, args.VideoURL.String())
-	if err != nil {
-		log.Fatal(err)
+	// 5. Navigate to initial URL using Netflix client
+	if err := nflx.NavigateTo(ctx, args.VideoURL.String()); err != nil {
+		log.Fatalf("Failed to navigate to %s: %v", args.VideoURL.String(), err)
 	}
 
-	// Listen for received media urls and queue them for download. Also listen for navigated events to update the current url
-	var browserURL = args.VideoURL.String()
-	for events := range nflx.Listen(ctx) {
-		switch events.evType {
-		case MediaUrlReceivedEvent:
-			err := q.QueueDownload(DownloadTask{
-				SrcURL:      toDownloadableURL(string(events.payload)),
-				VideoUrl:    browserURL,
-				DownloadDir: args.DownloadDir,
-			})
+	// 6. Listen for media and navigation events
+	currentURL := args.VideoURL.String()
+	// lastMeta caches the most complete metadata seen for the current episode.
+	// Subtitle events fire at slightly different times than audio events, so we
+	// reuse the last good metadata instead of calling GetMetadata() again and
+	// risking an incomplete result (e.g. missing SeasonNum → wrong folder).
+	var lastMeta downloader.Metadata
 
-			if err != nil {
-				log.Println(err)
+	for event := range nflx.Listen(ctx) {
+		switch event.Type {
+		case netflix.MediaUrlReceivedEvent:
+			meta := nflx.GetMetadata(ctx)
+			// Keep the best metadata: prefer a result that has SeasonNum over one that doesn't.
+			if meta.SeasonNum != "" || lastMeta.IsEmpty() {
+				lastMeta = meta
 			}
-		case NavigatedEvent:
-			log.Printf("ᐅ Navigate to %s \n", events.payload)
-			browserURL = string(events.payload)
+			if !lastMeta.IsEmpty() {
+				seasonStr := ""
+				if lastMeta.SeasonNum != "" {
+					seasonStr = fmt.Sprintf("Season %s ", lastMeta.SeasonNum)
+				}
+				epStr := storage.FormatEpisodeNum(lastMeta.EpisodeNum)
+				if epStr != "" {
+					epStr += " - "
+				}
+				log.Printf("🎬 Metadata detected: %s [%s%s%s]", lastMeta.ShowTitle, seasonStr, epStr, lastMeta.EpisodeTitle)
+			}
+			task := downloader.Task{
+				SrcURL:      nflx.ToDownloadableURL(event.Payload),
+				VideoURL:    currentURL,
+				DownloadDir: args.DownloadDir,
+				Meta:        lastMeta,
+			}
+			if err := queue.QueueDownload(task); err != nil {
+				log.Printf("Error queueing audio download: %v", err)
+			}
+
+		case netflix.SubtitleUrlReceivedEvent:
+			// Reuse cached metadata so subtitles always land in the same folder as audio.
+			// If we have no cached metadata yet, do a fresh fetch.
+			meta := lastMeta
+			if meta.IsEmpty() {
+				meta = nflx.GetMetadata(ctx)
+				lastMeta = meta
+			}
+			task := downloader.Task{
+				SrcURL:      event.Payload,
+				VideoURL:    currentURL,
+				DownloadDir: args.DownloadDir,
+				Meta:        meta,
+			}
+			if err := queue.QueueSubtitleDownload(task); err != nil {
+				log.Printf("Error queueing subtitle download: %v", err)
+			}
+
+		case netflix.NavigatedEvent:
+			log.Printf("ᐅ Navigated to %s", event.Payload)
+			currentURL = event.Payload
+			lastMeta = downloader.Metadata{} // reset on navigation to new episode
 		}
 	}
-}
-
-// toDownloadableURL removes the path from the payload to make the resource downloadable. In our case the path
-// always contains a download-range in bytes which we can discard. See isMediaURL.
-func toDownloadableURL(audioURL string) string {
-	// We need to remove the path from the audio url to get a downloadable url
-	u, err := url.Parse(audioURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	u.Path = ""
-	return u.String()
-}
-
-// toDownloadPath returns the path where to download the audio file. The path is composed of the video id, the track
-// id and a random number.
-func toDownloadPath(videoURL string, downloadDir string, fi probeInfo) string {
-	u, err := url.Parse(videoURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var audCodec = ".aac"
-	if fi.isXHEAAC {
-		audCodec = ".xhe-aac"
-	}
-
-	if strings.HasPrefix(u.Path, "/watch") && u.Query().Has("trackId") {
-		videoId := strings.TrimLeft(u.Path, "/watch/")
-		trackId := u.Query().Get("trackId")
-		return downloadDir + "/" + videoId + "-" + trackId + "-" + strconv.Itoa(rand.Int()) + audCodec + ".mp4a"
-	}
-
-	return downloadDir + "/" + "DL-" + strconv.Itoa(rand.Int()) + audCodec + ".mp4a"
 }
